@@ -5,6 +5,7 @@ import { ProductsModule } from './products/products.module';
 import { EnvConfigutation } from './config/app.config';
 import { JoiValidationSchema } from './config/joi.validation';
 import { CommonModule } from './common/common.module';
+import { SeedModule } from './seed/seed.module';
 
 @Module({
   imports: [
@@ -21,9 +22,12 @@ import { CommonModule } from './common/common.module';
       password: process.env.DB_PASSWORD,
       autoLoadEntities: true,
       synchronize: true,
+      connectTimeoutMS: 60000,
+      maxQueryExecutionTime: 10000,
     }),
     CommonModule,
     ProductsModule,
+    SeedModule,
   ],
 })
 export class AppModule {}

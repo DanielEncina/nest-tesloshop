@@ -7,12 +7,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { isUUID } from 'class-validator';
-import { Repository } from 'typeorm';
 
 import { CreateProductDto, UpdateProductDto } from './dto';
 import { PaginationDto } from 'src/common/dto';
-import { Product } from './entities/product.entity';
+import { Product, ProductImage } from './entities';
 
 @Injectable()
 export class ProductsService {
@@ -23,7 +23,10 @@ export class ProductsService {
   constructor(
     @InjectRepository(Product)
     private readonly productsRepository: Repository<Product>,
+    @InjectRepository(ProductImage)
+    private readonly productsImagesRepository: Repository<ProductImage>,
     private readonly configService: ConfigService,
+    private readonly dataSource: DataSource,
   ) {
     this.defaultLimit = this.configService.get<number>('defaultLimit');
     this.defaultOffset = this.configService.get<number>('defaultOffset');
@@ -31,15 +34,21 @@ export class ProductsService {
 
   async create(createProductDto: CreateProductDto) {
     try {
-      const producto = this.productsRepository.create(createProductDto);
+      const { images = [], ...productDetails } = createProductDto;
+      const producto = this.productsRepository.create({
+        ...productDetails,
+        images: images.map((image) =>
+          this.productsImagesRepository.create({ url: image }),
+        ),
+      });
       await this.productsRepository.save(producto);
-      return producto;
+      return { ...producto, images };
     } catch (error) {
       this.handleDBException(error);
     }
   }
 
-  findAll(paginationDto: PaginationDto) {
+  async findAll(paginationDto: PaginationDto) {
     const { limit = this.defaultLimit, offset = this.defaultOffset } =
       paginationDto;
 
@@ -48,16 +57,26 @@ export class ProductsService {
     //   .take(limit)
     //   .offset(offset)
     //   .getMany();
-    return this.productsRepository.find({
+    const products = await this.productsRepository.find({
       take: limit,
       skip: offset,
+      relations: ['images'],
     });
+
+    return products.map(({ images, ...rest }) => ({
+      ...rest,
+      images: images.map((image) => image.url),
+    }));
   }
 
   async findOne(term: string) {
     let product: Product;
 
     if (isUUID(term)) {
+      // product = await this.productsRepository.findOne({
+      //   where: { id: term },
+      //   relations: { images: true },
+      // });
       product = await this.productsRepository.findOneBy({ id: term });
     } else {
       const queryBuilder =
@@ -67,6 +86,7 @@ export class ProductsService {
           title: term.toUpperCase(),
           slug: term.toLowerCase(),
         })
+        .leftJoinAndSelect('products.images', 'images')
         .getOne();
     }
     // if (!product && isString(term)) {
@@ -79,27 +99,67 @@ export class ProductsService {
     return product;
   }
 
+  async findOnePlain(term: string) {
+    const { images = [], ...rest } = await this.findOne(term);
+    return {
+      ...rest,
+      images: images.map((image) => image.url),
+    };
+  }
+
   async update(id: string, updateProductDto: UpdateProductDto) {
+    const { images = [], ...toUpdate } = updateProductDto;
+
     const product = await this.productsRepository.preload({
-      id: id,
-      ...updateProductDto,
+      id,
+      ...toUpdate,
     });
+
     if (!product) {
       throw new NotFoundException(`Product ${id} not found!`);
     }
+    // create queryRunner
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+
+    // start transaction
+    await queryRunner.startTransaction();
 
     try {
-      await this.productsRepository.save(product);
+      if (images) {
+        await queryRunner.manager.delete(ProductImage, { product: { id } });
+        product.images = images.map((image) =>
+          this.productsImagesRepository.create({ url: image }),
+        );
+      }
+
+      await queryRunner.manager.save(product);
+
+      await queryRunner.commitTransaction();
+      await queryRunner.release();
+      // await this.productsRepository.save(product);
+
+      // return product;
+      return this.findOnePlain(id);
     } catch (error) {
+      await queryRunner.rollbackTransaction();
       this.handleDBException(error);
     }
-
-    return product;
   }
 
   async remove(term: string) {
     const product = await this.findOne(term);
     await this.productsRepository.remove(product);
+  }
+
+  async deleteAllProducts() {
+    // await this.productsRepository.delete({});
+    const queryBuilder = this.productsRepository.createQueryBuilder();
+    try {
+      return await queryBuilder.delete().where({}).execute();
+    } catch (error) {
+      this.handleDBException(error);
+    }
   }
 
   private handleDBException(error: any) {
