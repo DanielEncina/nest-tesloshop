@@ -80,6 +80,12 @@ yarn run test:e2e
 yarn run test:cov
 ```
 
+## Execute Seed
+
+```bash
+curl --location 'http://localhost:3000/api/v1/seed' 
+```
+
 ## Support
 
 MTO Team support.
