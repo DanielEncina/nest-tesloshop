@@ -11,4 +11,7 @@ export const EnvConfigutation = () => ({
   dbPassword: process.env.DB_PASSWORD || '',
   dbPort: +process.env.DB_PORT || 5432,
   hostApi: process.env.HOST_API || 'http://localhost',
+  jwtSecret: process.env.JWT_SECRET,
+  jwtExpiration: process.env.JWT_EXPIRATION || '1d',
+  jwtJti: process.env.JWT_JTI,
 });
